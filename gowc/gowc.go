@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"unicode"
@@ -26,7 +27,7 @@ type Results struct {
 
 func main() {
 	options := parseArguments()
-	results := readFileAndGetCounts(options.fileName)
+	results := getCounts(options.fileName)
 	printOutput(options, results)
 }
 
@@ -40,12 +41,9 @@ func handleError(e error) {
 func parseArguments() (options Options) {
 	args := os.Args[1:]
 
-	if len(args) == 0 {
-		fmt.Println("Usage: gowc [-c] <filename>")
-		os.Exit(1)
+	if len(args) > 0 && args[len(args)-1][0] != '-' {
+		options.fileName = args[len(args)-1]
 	}
-
-	options.fileName = args[len(args)-1]
 
 	options.cFlag = flag.Bool("c", false, "count the number of bytes in the file")
 	options.lFlag = flag.Bool("l", false, "count the number of lines in the file")
@@ -53,7 +51,7 @@ func parseArguments() (options Options) {
 	options.mFlag = flag.Bool("m", false, "count the number of characters in the file")
 	flag.Parse()
 
-	// By default, if no flags are provided, then we will count everything, lines, bytes, etc.
+	// By default, if no flags are provided, then we will count bytes, lines, and words.
 	if !*options.cFlag && !*options.lFlag && !*options.wFlag && !*options.mFlag {
 		*options.cFlag, *options.lFlag, *options.wFlag = true, true, true
 	}
@@ -61,17 +59,24 @@ func parseArguments() (options Options) {
 	return
 }
 
-func readFileAndGetCounts(fileName string) (results Results) {
-	f, err := os.Open(fileName)
-	handleError(err)
-	defer f.Close()
+func getCounts(fileName string) (results Results) {
+	var reader io.Reader
+
+	if fileName == "" {
+		reader = os.Stdin
+	} else {
+		var err error
+		reader, err = os.Open(fileName)
+		handleError(err)
+		defer reader.(*os.File).Close()
+	}
 
 	buf := make([]byte, 4*1024)
 
 	var leftover []byte
 
 	for {
-		n, err := f.Read(buf)
+		n, err := reader.Read(buf)
 
 		if err != nil {
 			if err.Error() == "EOF" {
