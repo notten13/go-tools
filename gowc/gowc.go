@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"unicode"
+	"unicode/utf8"
 )
 
 type Options struct {
@@ -13,17 +14,19 @@ type Options struct {
 	cFlag    *bool
 	lFlag    *bool
 	wFlag    *bool
+	mFlag    *bool
 }
 
 type Results struct {
 	byteCount int
 	wordCount int
 	lineCount int
+	charCount int
 }
 
 func main() {
 	options := parseArguments()
-	results := readFileAndCount(options.fileName)
+	results := readFileAndGetCounts(options.fileName)
 	printOutput(options, results)
 }
 
@@ -47,22 +50,25 @@ func parseArguments() (options Options) {
 	options.cFlag = flag.Bool("c", false, "count the number of bytes in the file")
 	options.lFlag = flag.Bool("l", false, "count the number of lines in the file")
 	options.wFlag = flag.Bool("w", false, "count the number of words in the file")
+	options.mFlag = flag.Bool("m", false, "count the number of characters in the file")
 	flag.Parse()
 
 	// By default, if no flags are provided, then we will count everything, lines, bytes, etc.
-	if !*options.cFlag && !*options.lFlag && !*options.wFlag {
+	if !*options.cFlag && !*options.lFlag && !*options.wFlag && !*options.mFlag {
 		*options.cFlag, *options.lFlag, *options.wFlag = true, true, true
 	}
 
 	return
 }
 
-func readFileAndCount(fileName string) (results Results) {
+func readFileAndGetCounts(fileName string) (results Results) {
 	f, err := os.Open(fileName)
 	handleError(err)
 	defer f.Close()
 
 	buf := make([]byte, 4*1024)
+
+	var leftover []byte
 
 	for {
 		n, err := f.Read(buf)
@@ -75,26 +81,55 @@ func readFileAndCount(fileName string) (results Results) {
 			}
 		}
 
-		if n > 0 {
-			results.byteCount += n
-		}
+		results.byteCount += n
+		results.lineCount += countLines(buf[:n])
+		results.wordCount += countWords(buf[:n])
+		results.charCount += countCharacters(buf[:n], &leftover)
+	}
 
-		inWord := true
-		for i := range n {
-			if buf[i] == '\n' {
-				results.lineCount++
-			}
+	return
+}
 
-			if unicode.IsSpace(rune(buf[i])) {
-				if inWord {
-					results.wordCount++
-					inWord = false
-				}
-			} else {
-				inWord = true
-			}
+func countLines(buffer []byte) (lineCount int) {
+	for i := range buffer {
+		if buffer[i] == '\n' {
+			lineCount++
 		}
 	}
+
+	return
+}
+
+func countWords(buffer []byte) (wordCount int) {
+	inWord := true
+	for i := range buffer {
+		if unicode.IsSpace(rune(buffer[i])) {
+			if inWord {
+				wordCount++
+				inWord = false
+			}
+		} else {
+			inWord = true
+		}
+	}
+
+	return
+}
+
+func countCharacters(buffer []byte, leftover *[]byte) (charCount int) {
+	i := 0
+	data := append(*leftover, buffer...)
+
+	for i < len(data) {
+		char, size := utf8.DecodeRune(data[i:])
+		if char == utf8.RuneError && size == 1 {
+			break
+		}
+		charCount++
+		i += size
+	}
+
+	*leftover = data[i:]
 
 	return
 }
@@ -112,6 +147,10 @@ func printOutput(options Options, results Results) {
 
 	if *options.cFlag {
 		output += strconv.Itoa(results.byteCount) + " "
+	}
+
+	if *options.mFlag {
+		output += strconv.Itoa(results.charCount) + " "
 	}
 
 	fmt.Println(output + options.fileName)
